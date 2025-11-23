@@ -155,8 +155,14 @@ def serve_html():
             }
         }
         
-        // 현재 날짜로 초기화
-        setDateValue(new Date());
+        // 현재 날짜로 초기화 (서울 시간 기준)
+        function getTodayInSeoul() {
+            const now = new Date();
+            const seoulTime = new Date(now.getTime() + (9 * 60 * 60 * 1000)); // UTC + 9시간
+            return seoulTime;
+        }
+        
+        setDateValue(getTodayInSeoul());
         
         function loadYesterday() {
             const currentDate = new Date(document.getElementById('dateSelector').value);
