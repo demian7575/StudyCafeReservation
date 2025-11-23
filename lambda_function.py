@@ -159,16 +159,16 @@ def serve_html():
         setDateValue(new Date());
         
         function loadYesterday() {
-            const yesterday = new Date();
-            yesterday.setDate(yesterday.getDate() - 1);
-            setDateValue(yesterday);
+            const currentDate = new Date(document.getElementById('dateSelector').value);
+            currentDate.setDate(currentDate.getDate() - 1);
+            setDateValue(currentDate);
             loadReservations();
         }
         
         function loadTomorrow() {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            setDateValue(tomorrow);
+            const currentDate = new Date(document.getElementById('dateSelector').value);
+            currentDate.setDate(currentDate.getDate() + 1);
+            setDateValue(currentDate);
             loadReservations();
         }
 
