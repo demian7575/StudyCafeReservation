@@ -110,7 +110,7 @@ def serve_html():
     <div class="container">
         <h1>Comepass 룸 예약 현황</h1>
         <div class="controls">
-            <input type="date" id="dateSelector" value="">
+            <input type="date" id="dateSelector" value="" onchange="loadReservations()">
             <button onclick="loadReservations()">예약 현황 조회</button>
             <button onclick="loadToday()">오늘</button>
             <button onclick="loadTomorrow()">내일</button>
@@ -120,17 +120,30 @@ def serve_html():
     </div>
 
     <script>
-        document.getElementById('dateSelector').value = new Date().toISOString().split('T')[0];
+        // Safari 호환성을 위한 날짜 설정
+        function setDateValue(date) {
+            const dateInput = document.getElementById('dateSelector');
+            const dateString = date.toISOString().split('T')[0];
+            dateInput.value = dateString;
+            // Safari에서 값이 제대로 설정되었는지 확인
+            if (dateInput.value !== dateString) {
+                setTimeout(() => {
+                    dateInput.value = dateString;
+                }, 10);
+            }
+        }
+        
+        setDateValue(new Date());
         
         function loadToday() {
-            document.getElementById('dateSelector').value = new Date().toISOString().split('T')[0];
+            setDateValue(new Date());
             loadReservations();
         }
         
         function loadTomorrow() {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
-            document.getElementById('dateSelector').value = tomorrow.toISOString().split('T')[0];
+            setDateValue(tomorrow);
             loadReservations();
         }
 
@@ -143,8 +156,15 @@ def serve_html():
             reservationDiv.innerHTML = '';
             
             try {
-                const response = await fetch(window.location.href + '?date=' + selectedDate, {
-                    headers: { 'Accept': 'application/json' }
+                // Safari 호환성을 위해 URL 구성 방식 변경
+                const baseUrl = window.location.origin + window.location.pathname;
+                const url = baseUrl + '?date=' + encodeURIComponent(selectedDate) + '&_t=' + Date.now();
+                
+                const response = await fetch(url, {
+                    headers: { 
+                        'Accept': 'application/json',
+                        'Cache-Control': 'no-cache'
+                    }
                 });
                 const data = await response.json();
                 
