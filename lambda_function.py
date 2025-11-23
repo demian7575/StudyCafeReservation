@@ -134,9 +134,8 @@ def serve_html():
         <h1>Comepass 룸 예약 현황</h1>
         <div class="controls">
             <input type="date" id="dateSelector" value="" onchange="loadReservations()">
-            <button onclick="loadReservations()">예약 현황 조회</button>
-            <button onclick="loadToday()">오늘</button>
-            <button onclick="loadTomorrow()">내일</button>
+            <button onclick="loadYesterday()">전일</button>
+            <button onclick="loadTomorrow()">익일</button>
         </div>
         <div id="status"></div>
         <div id="reservationDisplay"></div>
@@ -156,10 +155,13 @@ def serve_html():
             }
         }
         
+        // 현재 날짜로 초기화
         setDateValue(new Date());
         
-        function loadToday() {
-            setDateValue(new Date());
+        function loadYesterday() {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            setDateValue(yesterday);
             loadReservations();
         }
         
