@@ -2,25 +2,39 @@ import json
 import urllib3
 import boto3
 import os
+import time
 from datetime import datetime
 
+# 전역 변수로 재사용 가능한 리소스 초기화
+dynamodb = boto3.resource('dynamodb')
+http = urllib3.PoolManager()
+
 def lambda_handler(event, context):
+    start_time = time.time()
+    print(f"Lambda started at {datetime.now()}")
+    
     # GET 요청이고 Accept 헤더가 text/html이면 HTML 페이지 반환
     if event.get('httpMethod') == 'GET' and 'text/html' in event.get('headers', {}).get('Accept', ''):
-        return serve_html()
+        result = serve_html()
+        print(f"HTML served in {time.time() - start_time:.2f}s")
+        return result
     
     # 그 외에는 API 응답
     query_params = event.get('queryStringParameters') or {}
     selected_date = query_params.get('date', datetime.now().strftime('%Y-%m-%d'))
-    return get_reservations(selected_date)
+    result = get_reservations(selected_date)
+    print(f"API response completed in {time.time() - start_time:.2f}s")
+    return result
 
 def get_cached_token():
     """DynamoDB에서 캐시된 토큰 가져오기"""
+    start_time = time.time()
     try:
-        dynamodb = boto3.resource('dynamodb')
         table = dynamodb.Table('aipm-backend-prod-stories')
         
         response = table.get_item(Key={'id': 'comepass_token'})
+        print(f"DynamoDB query took {time.time() - start_time:.2f}s")
+        
         if 'Item' in response:
             token_data = response['Item']
             expires_at = int(token_data.get('expires_at', 0))
@@ -28,20 +42,25 @@ def get_cached_token():
             
             # 토큰이 아직 유효한지 확인 (10분 여유)
             if expires_at > current_time + 600:
+                print("Using cached token")
                 return {
                     'access_token': token_data['access_token'],
                     'p_code': token_data['p_code'],
                     'p_name': token_data['p_name'],
                     'expires_at': expires_at
                 }
-    except:
-        pass
+            else:
+                print("Cached token expired")
+        else:
+            print("No cached token found")
+    except Exception as e:
+        print(f"Error getting cached token: {e}")
     return None
 
 def save_token(token_data):
     """DynamoDB에 토큰 저장"""
+    start_time = time.time()
     try:
-        dynamodb = boto3.resource('dynamodb')
         table = dynamodb.Table('aipm-backend-prod-stories')
         
         table.put_item(Item={
@@ -52,12 +71,14 @@ def save_token(token_data):
             'expires_at': int(token_data['access_token_expires_in']),
             'updated_at': int(datetime.now().timestamp())
         })
-    except:
-        pass
+        print(f"Token saved in {time.time() - start_time:.2f}s")
+    except Exception as e:
+        print(f"Error saving token: {e}")
 
 def get_new_token():
     """새 토큰 발급"""
-    http = urllib3.PoolManager()
+    start_time = time.time()
+    print("Getting new token from Comepass API")
     
     # 환경변수에서 자격증명 가져오기
     comepass_id = os.environ.get('COMEPASS_ID')
@@ -78,7 +99,9 @@ def get_new_token():
     
     login_data = {"id": comepass_id, "pwd": comepass_pwd}
     login_response = http.request('POST', login_url, body=json.dumps(login_data), headers=login_headers)
-    return json.loads(login_response.data.decode('utf-8'))
+    result = json.loads(login_response.data.decode('utf-8'))
+    print(f"New token obtained in {time.time() - start_time:.2f}s")
+    return result
 
 def serve_html():
     html_content = '''<!DOCTYPE html>
@@ -285,7 +308,7 @@ def serve_html():
     }
 
 def get_reservations(date):
-    http = urllib3.PoolManager()
+    start_time = time.time()
     
     try:
         # 캐시된 토큰 확인
@@ -309,6 +332,7 @@ def get_reservations(date):
             save_token(login_result)
         
         # 예약 현황 조회
+        api_start = time.time()
         studyroom_url = f'https://api.comepass.kr/place/studyroom?date={date}'
         
         studyroom_headers = {
@@ -323,6 +347,7 @@ def get_reservations(date):
         
         studyroom_response = http.request('GET', studyroom_url, headers=studyroom_headers)
         studyroom_data = json.loads(studyroom_response.data.decode('utf-8'))
+        print(f"Studyroom API call took {time.time() - api_start:.2f}s")
         
         return {
             'statusCode': 200,
@@ -332,13 +357,15 @@ def get_reservations(date):
                 'date': date,
                 'reservations': studyroom_data,
                 'token_expires': token_expires,
-                'token_cached': cached_token is not None
+                'token_cached': cached_token is not None,
+                'processing_time': f"{time.time() - start_time:.2f}s"
             })
         }
         
     except Exception as e:
+        print(f"Error in get_reservations: {e}")
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': str(e)})
+            'body': json.dumps({'error': str(e), 'processing_time': f"{time.time() - start_time:.2f}s"})
         }
