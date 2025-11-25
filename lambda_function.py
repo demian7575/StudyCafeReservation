@@ -48,9 +48,13 @@ def get_cached_token():
             expires_at = int(token_data.get('expires_at', 0))
             current_time = int(datetime.now().timestamp())
             
-            # 토큰이 아직 유효한지 확인 (10분 여유)
-            if expires_at > current_time + 600:
-                print("Using cached token")
+            print(f"Token expires at: {datetime.fromtimestamp(expires_at)}")
+            print(f"Current time: {datetime.fromtimestamp(current_time)}")
+            print(f"Time until expiry: {expires_at - current_time} seconds")
+            
+            # 토큰이 아직 유효한지 확인 (5분 여유)
+            if expires_at > current_time + 300:
+                print("Using cached token (valid)")
                 return {
                     'access_token': token_data['access_token'],
                     'p_code': token_data['p_code'],
@@ -58,7 +62,7 @@ def get_cached_token():
                     'expires_at': expires_at
                 }
             else:
-                print("Cached token expired")
+                print(f"Cached token expired or expiring soon (expires in {expires_at - current_time}s)")
         else:
             print("No cached token found")
     except Exception as e:
@@ -71,13 +75,19 @@ def save_token(token_data):
     try:
         table = dynamodb.Table('aipm-backend-prod-stories')
         
+        expires_at = int(token_data['access_token_expires_in'])
+        current_time = int(datetime.now().timestamp())
+        
+        print(f"Saving token that expires at: {datetime.fromtimestamp(expires_at)}")
+        print(f"Token valid for: {expires_at - current_time} seconds")
+        
         table.put_item(Item={
             'id': 'comepass_token',
             'access_token': token_data['access_token'],
             'p_code': token_data['p_code'],
             'p_name': token_data['p_name'],
-            'expires_at': int(token_data['access_token_expires_in']),
-            'updated_at': int(datetime.now().timestamp())
+            'expires_at': expires_at,
+            'updated_at': current_time
         })
         print(f"Token saved in {time.time() - start_time:.2f}s")
     except Exception as e:
