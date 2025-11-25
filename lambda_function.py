@@ -40,7 +40,7 @@ def get_cached_token():
     try:
         table = dynamodb.Table('aipm-backend-prod-stories')
         
-        response = table.get_item(Key={'id': 'comepass_token'})
+        response = table.get_item(Key={'id': 1})  # 숫자 키 사용
         print(f"DynamoDB query took {time.time() - start_time:.2f}s")
         
         if 'Item' in response:
@@ -82,7 +82,7 @@ def save_token(token_data):
         print(f"Token valid for: {expires_at - current_time} seconds")
         
         table.put_item(Item={
-            'id': 'comepass_token',
+            'id': 1,  # 숫자 키 사용
             'access_token': token_data['access_token'],
             'p_code': token_data['p_code'],
             'p_name': token_data['p_name'],
