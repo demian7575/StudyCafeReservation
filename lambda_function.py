@@ -164,37 +164,57 @@ def serve_html():
         // Safari 호환성을 위한 날짜 설정
         function setDateValue(date) {
             const dateInput = document.getElementById('dateSelector');
-            const dateString = date.toISOString().split('T')[0];
+            // Safari에서 더 안정적인 날짜 포맷팅
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const dateString = year + '-' + month + '-' + day;
+            
             dateInput.value = dateString;
+            
             // Safari에서 값이 제대로 설정되었는지 확인
             if (dateInput.value !== dateString) {
                 setTimeout(() => {
                     dateInput.value = dateString;
-                }, 10);
+                }, 50); // 시간을 늘려서 더 안정적으로
             }
         }
         
         // 현재 날짜로 초기화 (서울 시간 기준)
         function getTodayInSeoul() {
             const now = new Date();
-            const seoulTime = new Date(now.getTime() + (9 * 60 * 60 * 1000)); // UTC + 9시간
+            // Safari에서 더 안정적인 시간대 처리
+            const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            const seoulTime = new Date(utc + (9 * 60 * 60 * 1000));
             return seoulTime;
         }
         
         setDateValue(getTodayInSeoul());
         
         function loadYesterday() {
-            const currentDate = new Date(document.getElementById('dateSelector').value);
-            currentDate.setDate(currentDate.getDate() - 1);
-            setDateValue(currentDate);
-            loadReservations();
+            const dateInput = document.getElementById('dateSelector');
+            const currentDateStr = dateInput.value;
+            if (currentDateStr) {
+                // Safari에서 더 안정적인 날짜 파싱
+                const parts = currentDateStr.split('-');
+                const currentDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                currentDate.setDate(currentDate.getDate() - 1);
+                setDateValue(currentDate);
+                loadReservations();
+            }
         }
         
         function loadTomorrow() {
-            const currentDate = new Date(document.getElementById('dateSelector').value);
-            currentDate.setDate(currentDate.getDate() + 1);
-            setDateValue(currentDate);
-            loadReservations();
+            const dateInput = document.getElementById('dateSelector');
+            const currentDateStr = dateInput.value;
+            if (currentDateStr) {
+                // Safari에서 더 안정적인 날짜 파싱
+                const parts = currentDateStr.split('-');
+                const currentDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+                currentDate.setDate(currentDate.getDate() + 1);
+                setDateValue(currentDate);
+                loadReservations();
+            }
         }
 
         async function loadReservations() {
@@ -210,12 +230,37 @@ def serve_html():
                 const baseUrl = window.location.origin + window.location.pathname;
                 const url = baseUrl + '?date=' + encodeURIComponent(selectedDate) + '&_t=' + Date.now();
                 
-                const response = await fetch(url, {
-                    headers: { 
-                        'Accept': 'application/json',
-                        'Cache-Control': 'no-cache'
-                    }
+                // Safari에서 fetch 문제가 있을 수 있으므로 XMLHttpRequest 사용
+                const response = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('GET', url, true);
+                    xhr.setRequestHeader('Accept', 'application/json');
+                    xhr.setRequestHeader('Cache-Control', 'no-cache');
+                    
+                    xhr.onload = function() {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve({
+                                ok: true,
+                                status: xhr.status,
+                                json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                            });
+                        } else {
+                            reject(new Error('HTTP ' + xhr.status));
+                        }
+                    };
+                    
+                    xhr.onerror = function() {
+                        reject(new Error('Network error'));
+                    };
+                    
+                    xhr.ontimeout = function() {
+                        reject(new Error('Request timeout'));
+                    };
+                    
+                    xhr.timeout = 30000; // 30초 타임아웃
+                    xhr.send();
                 });
+                
                 const data = await response.json();
                 
                 if (response.ok && !data.error) {
