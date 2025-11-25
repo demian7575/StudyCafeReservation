@@ -13,6 +13,14 @@ def lambda_handler(event, context):
     start_time = time.time()
     print(f"Lambda started at {datetime.now()}")
     
+    # favicon.ico 요청 처리
+    if event.get('path') == '/favicon.ico':
+        return {
+            'statusCode': 204,
+            'headers': {'Content-Type': 'image/x-icon'},
+            'body': ''
+        }
+    
     # GET 요청이고 Accept 헤더가 text/html이면 HTML 페이지 반환
     if event.get('httpMethod') == 'GET' and 'text/html' in event.get('headers', {}).get('Accept', ''):
         result = serve_html()
