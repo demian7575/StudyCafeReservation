@@ -118,6 +118,7 @@ def serve_html():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comepass 룸 예약 현황</title>
+    <link rel="icon" href="data:,">
     <style>
         body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; }
         .container { background: #f5f5f5; padding: 20px; border-radius: 8px; }
