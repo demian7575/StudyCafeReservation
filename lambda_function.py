@@ -230,36 +230,17 @@ def serve_html():
                 const baseUrl = window.location.origin + window.location.pathname;
                 const url = baseUrl + '?date=' + encodeURIComponent(selectedDate) + '&_t=' + Date.now();
                 
-                // Safari에서 fetch 문제가 있을 수 있으므로 XMLHttpRequest 사용
-                const response = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('GET', url, true);
-                    xhr.setRequestHeader('Accept', 'application/json');
-                    xhr.setRequestHeader('Cache-Control', 'no-cache');
-                    
-                    xhr.onload = function() {
-                        if (xhr.status >= 200 && xhr.status < 300) {
-                            resolve({
-                                ok: true,
-                                status: xhr.status,
-                                json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                            });
-                        } else {
-                            reject(new Error('HTTP ' + xhr.status));
-                        }
-                    };
-                    
-                    xhr.onerror = function() {
-                        reject(new Error('Network error'));
-                    };
-                    
-                    xhr.ontimeout = function() {
-                        reject(new Error('Request timeout'));
-                    };
-                    
-                    xhr.timeout = 30000; // 30초 타임아웃
-                    xhr.send();
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: { 
+                        'Accept': 'application/json',
+                        'Cache-Control': 'no-cache'
+                    }
                 });
+                
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
                 
                 const data = await response.json();
                 
