@@ -126,21 +126,26 @@ def serve_html():
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Comepass 룸 예약 현황</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>스터디카페 예약 현황</title>
     <link rel="icon" href="data:,">
     <style>
-        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; }
-        .container { background: #f5f5f5; padding: 20px; border-radius: 8px; }
-        .controls { margin: 10px 0; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; height: 100dvh; display: flex; flex-direction: column; overflow-x: hidden; }
+        .header { background: #f5f5f5; padding: 10px; border-bottom: 2px solid #ddd; flex-shrink: 0; text-align: center; }
+        .header h1 { margin: 0; }
+        .content { flex: 0 0 auto; overflow-y: visible; padding: 0; }
+        .spacer { flex: 1; }
+        .footer { background: #f5f5f5; padding: 10px; border-top: 2px solid #ddd; flex-shrink: 0; }
+        .controls { margin: 0; }
         input[type="date"] { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
         button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
         button:hover { background: #0056b3; }
-        .loading { color: #666; }
-        .error { color: red; }
-        .success { color: green; }
-        .schedule-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-        .schedule-table th, .schedule-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        .schedule-table { width: 100%; border-collapse: collapse; margin: 0; display: block; }
+        .schedule-table thead { display: table; width: 100%; table-layout: fixed; }
+        .schedule-table tbody { display: block; max-height: calc(100dvh - 180px); overflow-y: auto; overflow-x: hidden; }
+        .schedule-table tbody tr { display: table; width: 100%; table-layout: fixed; height: calc((100dvh - 180px) / 14); }
+        .schedule-table tfoot { display: table; width: 100%; table-layout: fixed; }
+        .schedule-table th, .schedule-table td { border: 1px solid #ddd; padding: 2px 8px; text-align: center; }
         .schedule-table th { background-color: #f2f2f2; font-weight: bold; }
         .time-header { background-color: #e9ecef; font-weight: bold; }
         .reserved { background-color: #d4edda; }
@@ -149,15 +154,19 @@ def serve_html():
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Comepass 룸 예약 현황</h1>
+    <div class="header">
+        <h1>스터디카페 예약 현황</h1>
+    </div>
+    <div class="content">
+        <div id="reservationDisplay"></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="footer">
         <div class="controls">
             <input type="date" id="dateSelector" value="" onchange="loadReservations()">
             <button onclick="loadYesterday()">전일</button>
             <button onclick="loadTomorrow()">익일</button>
         </div>
-        <div id="status"></div>
-        <div id="reservationDisplay"></div>
     </div>
 
     <script>
@@ -218,12 +227,8 @@ def serve_html():
         }
 
         async function loadReservations() {
-            const statusDiv = document.getElementById('status');
             const reservationDiv = document.getElementById('reservationDisplay');
             const selectedDate = document.getElementById('dateSelector').value;
-            
-            statusDiv.innerHTML = '<div class="loading">예약 현황을 조회하는 중...</div>';
-            reservationDiv.innerHTML = '';
             
             try {
                 // Safari 호환성을 위해 URL 구성 방식 변경
@@ -245,13 +250,12 @@ def serve_html():
                 const data = await response.json();
                 
                 if (response.ok && !data.error) {
-                    statusDiv.innerHTML = '<div class="success">예약 현황을 성공적으로 조회했습니다!</div>';
                     displaySchedule(data);
                 } else {
                     throw new Error(data.error || '예약 현황 조회 실패');
                 }
             } catch (error) {
-                statusDiv.innerHTML = `<div class="error">오류: ${error.message}</div>`;
+                console.error('Error loading reservations:', error);
             }
         }
 
@@ -270,9 +274,10 @@ def serve_html():
             const roomData = {};
             const roomTotals = {};
             
-            // 9시부터 22시까지 시간대 생성
-            for (let hour = 9; hour <= 22; hour++) {
-                timeSlots.push(hour + ':00');
+            // 0시부터 24시까지 시간대 생성
+            for (let hour = 0; hour <= 24; hour++) {
+                const timeStr = hour === 24 ? '24:00' : (hour < 10 ? '0' + hour : hour) + ':00';
+                timeSlots.push(timeStr);
             }
             
             // 룸별 데이터 초기화
@@ -292,9 +297,9 @@ def serve_html():
                     const endHour = parseInt(reservation.s_e_time.split(':')[0]);
                     const endMin = parseInt(reservation.s_e_time.split(':')[1]);
                     
-                    // 사용시간(분)을 시간으로 변환
+                    // 사용시간(분)을 시간으로 변환하고 올림
                     const useTimeMinutes = parseInt(reservation.s_use_time);
-                    const useTimeHours = useTimeMinutes / 60;
+                    const useTimeHours = Math.ceil(useTimeMinutes / 60);
                     
                     roomTotals[roomName] += useTimeHours;
                     
@@ -335,6 +340,8 @@ def serve_html():
                 html += '</tr>';
             });
             
+            html += '</tbody><tfoot>';
+            
             // 총 시간 행
             html += '<tr class="total-row"><td>총 시간</td>';
             Object.values(roomNames).forEach(roomName => {
@@ -342,9 +349,18 @@ def serve_html():
             });
             html += '</tr>';
             
-            html += '</tbody></table>';
+            html += '</tfoot></table>';
             
             reservationDiv.innerHTML = html;
+            
+            // Scroll to 09:00 row
+            setTimeout(() => {
+                const tbody = document.querySelector('.schedule-table tbody');
+                if (tbody) {
+                    const rowHeight = tbody.querySelector('tr')?.offsetHeight || 30;
+                    tbody.scrollTop = 9 * rowHeight;
+                }
+            }, 100);
         }
         
         window.onload = function() {
