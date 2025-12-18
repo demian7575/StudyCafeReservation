@@ -274,9 +274,9 @@ def serve_html():
             const roomData = {};
             const roomTotals = {};
             
-            // 0시부터 24시까지 시간대 생성
-            for (let hour = 0; hour <= 24; hour++) {
-                const timeStr = hour === 24 ? '24:00' : (hour < 10 ? '0' + hour : hour) + ':00';
+            // 0시부터 23시까지 시간대 생성
+            for (let hour = 0; hour < 24; hour++) {
+                const timeStr = (hour < 10 ? '0' + hour : hour) + ':00';
                 timeSlots.push(timeStr);
             }
             
@@ -291,7 +291,19 @@ def serve_html():
             
             // 예약 데이터 처리
             if (data.reservations && data.reservations.list) {
+                if (data.reservations.list.length > 0) {
+                    console.log('First reservation data:', JSON.stringify(data.reservations.list[0], null, 2));
+                }
                 data.reservations.list.forEach(reservation => {
+                    // 취소된 예약 제외 (다양한 취소 상태 필드 확인)
+                    if (reservation.s_status === 'C' || reservation.s_status === 'CANCEL' || 
+                        reservation.cancel_yn === 'Y' || reservation.cancel_yn === 'YES' ||
+                        reservation.status === 'cancelled' || reservation.cancelled === true ||
+                        reservation.is_cancelled === true || reservation.is_cancelled === 'Y') {
+                        console.log('Cancelled reservation skipped:', reservation.m_nm);
+                        return;
+                    }
+                    
                     const roomName = roomNames[reservation.sg_name] || reservation.sg_name;
                     const startHour = parseInt(reservation.s_s_time.split(':')[0]);
                     const endHour = parseInt(reservation.s_e_time.split(':')[0]);
@@ -303,21 +315,40 @@ def serve_html():
                     
                     roomTotals[roomName] += useTimeHours;
                     
-                    // 시작 시간부터 끝 시간 전까지만 표시
-                    for (let hour = startHour; hour < endHour; hour++) {
-                        const timeKey = hour + ':00';
-                        if (roomData[roomName] && roomData[roomName][timeKey] !== undefined) {
-                            roomData[roomName][timeKey] = reservation.m_nm;
+                    // 시간 표시 로직 (전일부터 시작된 예약 고려)
+                    if (endHour < startHour) {
+                        // 자정을 넘어가는 예약: 0시부터 끝시간까지만 표시 (당일 부분)
+                        for (let hour = 0; hour < endHour; hour++) {
+                            const timeKey = (hour < 10 ? '0' + hour : hour) + ':00';
+                            if (roomData[roomName] && roomData[roomName][timeKey] !== undefined) {
+                                roomData[roomName][timeKey] = reservation.m_nm;
+                            }
+                        }
+                        // 끝 시간에 분이 있는 경우
+                        if (endMin > 0) {
+                            const endTimeKey = (endHour < 10 ? '0' + endHour : endHour) + ':00';
+                            if (roomData[roomName] && roomData[roomName][endTimeKey] !== undefined) {
+                                roomData[roomName][endTimeKey] = reservation.m_nm;
+                            }
+                        }
+                    } else {
+                        // 일반적인 경우: 시작 시간부터 끝 시간 전까지
+                        for (let hour = startHour; hour < endHour; hour++) {
+                            const timeKey = (hour < 10 ? '0' + hour : hour) + ':00';
+                            if (roomData[roomName] && roomData[roomName][timeKey] !== undefined) {
+                                roomData[roomName][timeKey] = reservation.m_nm;
+                            }
+                        }
+                        // 끝 시간에 분이 있는 경우
+                        if (endMin > 0) {
+                            const endTimeKey = (endHour < 10 ? '0' + endHour : endHour) + ':00';
+                            if (roomData[roomName] && roomData[roomName][endTimeKey] !== undefined) {
+                                roomData[roomName][endTimeKey] = reservation.m_nm;
+                            }
                         }
                     }
                     
-                    // 끝 시간에 분이 있는 경우에만 해당 시간대 포함
-                    if (endMin > 0) {
-                        const endTimeKey = endHour + ':00';
-                        if (roomData[roomName] && roomData[roomName][endTimeKey] !== undefined) {
-                            roomData[roomName][endTimeKey] = reservation.m_nm;
-                        }
-                    }
+
                 });
             }
             
