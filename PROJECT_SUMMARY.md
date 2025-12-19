@@ -77,21 +77,23 @@ Comepass API + DynamoDB (토큰 캐싱)
 
 ## 배포 정보
 
-### 최근 업데이트 (2025-12-18)
-**커밋**: ae37b3a
-**제목**: Update refresh-service UI: responsive layout, fixed header/footer, improved mobile support
+### 최근 업데이트 (2025-12-19/20)
+**커밋**: e4cbfa3 + 추가 업데이트
+**제목**: Fix reservation display and cancellation filtering + REFUND status support
 
 #### 주요 변경사항
-1. 제목 변경: "Comepass 룸 예약 현황" → "스터디카페 예약 현황"
-2. 고정 헤더/푸터 레이아웃 구현
-3. 전체 시간대 표시 (00:00-24:00)
-4. 14개 행 표시, 동적 행 높이 계산
-5. 기본 스크롤 위치 09:00
-6. 예약 시간 올림 계산 적용
-7. 모바일 최적화 (100dvh, safe area)
-8. 상태 메시지 제거 (로딩/성공/에러)
-9. 셀 패딩 축소 및 불필요한 간격 제거
-10. 좌우 스크롤바 제거
+1. **24:00 시간대 제거**: 00:00~23:00만 표시 (24시간 정확히)
+2. **포괄적인 취소 예약 필터링**:
+   - `s_status === 'C'` 또는 `'CANCEL'`
+   - `cancel_yn === 'Y'` 또는 `'YES'`
+   - `status === 'cancelled'`, `cancelled === true`
+   - `is_cancelled === true` 또는 `'Y'`
+   - `s_state === 'REFUND'` (환불된 예약)
+   - `ord_refund_step === 'SUCCESS'` (환불 완료)
+3. **자정 넘어가는 예약 처리**: 전일부터 시작된 예약의 당일 부분만 표시
+4. **시간 포맷 일치성**: timeKey와 timeSlots 모두 '00:00' 형식 사용
+5. **디버깅 로그 추가**: 예약 데이터 구조 분석 및 취소 예약 스킵 로그
+6. **실제 취소 상태 확인**: `s_state: "REFUND"`, `ord_refund_step: "SUCCESS"` 지원
 
 ### 배포 명령어
 ```bash

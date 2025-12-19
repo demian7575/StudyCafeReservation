@@ -295,11 +295,22 @@ def serve_html():
                     console.log('First reservation data:', JSON.stringify(data.reservations.list[0], null, 2));
                 }
                 data.reservations.list.forEach(reservation => {
+                    // 취소 상태 디버깅
+                    console.log('Reservation status check:', {
+                        name: reservation.m_nm,
+                        s_status: reservation.s_status,
+                        cancel_yn: reservation.cancel_yn,
+                        status: reservation.status,
+                        cancelled: reservation.cancelled,
+                        is_cancelled: reservation.is_cancelled
+                    });
+                    
                     // 취소된 예약 제외 (다양한 취소 상태 필드 확인)
                     if (reservation.s_status === 'C' || reservation.s_status === 'CANCEL' || 
                         reservation.cancel_yn === 'Y' || reservation.cancel_yn === 'YES' ||
                         reservation.status === 'cancelled' || reservation.cancelled === true ||
-                        reservation.is_cancelled === true || reservation.is_cancelled === 'Y') {
+                        reservation.is_cancelled === true || reservation.is_cancelled === 'Y' ||
+                        reservation.s_state === 'REFUND' || reservation.ord_refund_step === 'SUCCESS') {
                         console.log('Cancelled reservation skipped:', reservation.m_nm);
                         return;
                     }
