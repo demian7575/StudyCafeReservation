@@ -3,7 +3,7 @@ import urllib3
 import boto3
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 전역 변수로 재사용 가능한 리소스 초기화
 dynamodb = boto3.resource('dynamodb')
@@ -20,6 +20,31 @@ def lambda_handler(event, context):
             'headers': {'Content-Type': 'image/x-icon'},
             'body': ''
         }
+    
+    # 데이터 수집 엔드포인트들
+    if event.get('path') == '/collect-data':
+        return collect_and_store_reservation_data()
+    
+    if event.get('path') == '/collect-past':
+        return collect_past_data()
+    
+    if event.get('path') == '/collect-three-months':
+        return collect_three_months_data()
+    
+    if event.get('path') == '/auto-collect':
+        return auto_sync_data()
+    
+    # API 엔드포인트들
+    if event.get('path') == '/api/trends':
+        query_params = event.get('queryStringParameters') or {}
+        start_date = query_params.get('start', '')
+        end_date = query_params.get('end', '')
+        analysis_type = query_params.get('type', 'weekly')
+        return get_trends_data(start_date, end_date, analysis_type)
+    
+    # 페이지 엔드포인트들
+    if event.get('path') == '/trends':
+        return serve_trends_page()
     
     # GET 요청이고 Accept 헤더가 text/html이면 HTML 페이지 반환
     if event.get('httpMethod') == 'GET' and 'text/html' in event.get('headers', {}).get('Accept', ''):
@@ -480,3 +505,586 @@ def get_reservations(date):
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
             'body': json.dumps({'error': str(e), 'processing_time': f"{time.time() - start_time:.2f}s"})
         }
+
+def serve_trends_page():
+    """추이분석 페이지"""
+    html = '''<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스터디카페 추이분석</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; position: relative; }
+        .home-link { position: absolute; top: 20px; right: 20px; background: #007bff; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; }
+        .home-link:hover { background: #0056b3; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .nav { margin: 20px 0; text-align: center; }
+        .nav-btn { background: #6c757d; color: white; padding: 10px 20px; border: none; border-radius: 4px; margin: 0 10px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .nav-btn.active { background: #007bff; }
+        .nav-btn:hover { opacity: 0.8; }
+        .controls { margin: 20px 0; text-align: center; }
+        .period-controls { margin: 20px 0; text-align: center; }
+        input[type="date"] { padding: 8px; margin: 0 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 0 5px; }
+        button:hover { background: #0056b3; }
+        button.active { background: #28a745; }
+        .chart-container { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center; }
+        .loading { text-align: center; color: #666; padding: 50px; }
+        .chart-canvas { width: 100%; max-height: 400px; }
+        .chart-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    </style>
+</head>
+<body>
+    <a href="/prod/" class="home-link">스터디카페 관리</a>
+    <div class="container">
+        <div class="header">
+            <h1>📈 스터디카페 추이분석</h1>
+        </div>
+        
+        <div class="controls">
+            <button id="weeklyBtn" onclick="setTrendsType('weekly')" class="active">주별</button>
+            <button id="monthlyBtn" onclick="setTrendsType('monthly')">월별</button>
+        </div>
+        
+        <div class="period-controls">
+            <input type="date" id="startDate" onchange="loadTrends()">
+            <span>~</span>
+            <input type="date" id="endDate" onchange="loadTrends()">
+            <button onclick="setDefaultPeriod()">최근 2개월</button>
+        </div>
+        
+        <div class="chart-grid">
+            <div class="chart-container">
+                <h3>매출 추이</h3>
+                <canvas id="revenueChart" class="chart-canvas"></canvas>
+                <div id="revenue-loading" class="loading" style="display:none">
+                    <p>매출 데이터를 불러오는 중...</p>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h3>예약 건수 추이</h3>
+                <canvas id="reservationsChart" class="chart-canvas"></canvas>
+                <div id="reservations-loading" class="loading" style="display:none">
+                    <p>예약 데이터를 불러오는 중...</p>
+                </div>
+            </div>
+            
+            <div class="chart-container">
+                <h3>사용 시간 추이</h3>
+                <canvas id="hoursChart" class="chart-canvas"></canvas>
+                <div id="hours-loading" class="loading" style="display:none">
+                    <p>시간 데이터를 불러오는 중...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let revenueChart = null;
+        let reservationsChart = null;
+        let hoursChart = null;
+        let currentType = 'weekly';
+        
+        function setTrendsType(type) {
+            currentType = type;
+            document.getElementById('weeklyBtn').classList.toggle('active', type === 'weekly');
+            document.getElementById('monthlyBtn').classList.toggle('active', type === 'monthly');
+            loadTrends();
+        }
+        
+        function setDefaultPeriod() {
+            const today = new Date();
+            const twoMonthsAgo = new Date(today);
+            twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+            
+            document.getElementById('startDate').value = twoMonthsAgo.toISOString().split('T')[0];
+            document.getElementById('endDate').value = today.toISOString().split('T')[0];
+            
+            loadTrends();
+        }
+        
+        function loadTrends() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            
+            if (!startDate || !endDate) {
+                alert('시작일과 종료일을 모두 선택해주세요.');
+                return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('시작일이 종료일보다 늦을 수 없습니다.');
+                return;
+            }
+            
+            // 미래 날짜 제한
+            const today = new Date();
+            if (new Date(endDate) > today) {
+                alert('종료일은 오늘 날짜를 초과할 수 없습니다.');
+                return;
+            }
+            
+            // 로딩 표시
+            document.getElementById('revenue-loading').style.display = 'block';
+            document.getElementById('reservations-loading').style.display = 'block';
+            document.getElementById('hours-loading').style.display = 'block';
+            
+            // 기존 차트 제거
+            if (revenueChart) revenueChart.destroy();
+            if (reservationsChart) reservationsChart.destroy();
+            if (hoursChart) hoursChart.destroy();
+            
+            fetch(`/prod/api/trends?start=${startDate}&end=${endDate}&type=${currentType}`)
+                .then(response => response.json())
+                .then(data => displayTrends(data))
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('revenue-loading').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
+                    document.getElementById('reservations-loading').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
+                    document.getElementById('hours-loading').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
+                });
+        }
+        
+        function displayTrends(data) {
+            // 로딩 숨기기
+            document.getElementById('revenue-loading').style.display = 'none';
+            document.getElementById('reservations-loading').style.display = 'none';
+            document.getElementById('hours-loading').style.display = 'none';
+            
+            const chartOptions = {
+                responsive: true,
+                maintainAspectRatio: true,
+                aspectRatio: 2,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            };
+            
+            // 매출 추이 차트
+            const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+            revenueChart = new Chart(revenueCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: '매출 (원)',
+                        data: data.revenue || [],
+                        backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                        borderColor: 'rgb(75, 192, 192)',
+                        borderWidth: 1
+                    }]
+                },
+                options: chartOptions
+            });
+            
+            // 예약 건수 추이 차트
+            const reservationsCtx = document.getElementById('reservationsChart').getContext('2d');
+            reservationsChart = new Chart(reservationsCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: '예약 건수',
+                        data: data.reservations || [],
+                        backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                        borderColor: 'rgb(255, 99, 132)',
+                        borderWidth: 1
+                    }]
+                },
+                options: chartOptions
+            });
+            
+            // 사용 시간 추이 차트
+            const hoursCtx = document.getElementById('hoursChart').getContext('2d');
+            hoursChart = new Chart(hoursCtx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: '사용 시간 (시간)',
+                        data: data.hours || [],
+                        backgroundColor: 'rgba(54, 162, 235, 0.8)',
+                        borderColor: 'rgb(54, 162, 235)',
+                        borderWidth: 1
+                    }]
+                },
+                options: chartOptions
+            });
+        }
+        
+        window.onload = function() {
+            setDefaultPeriod();
+        };
+    </script>
+</body>
+</html>'''
+    
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'text/html; charset=utf-8'},
+        'body': html
+    }
+
+def get_trends_data(start_date, end_date, analysis_type='weekly'):
+    """추이분석 데이터 조회 (배치 쿼리)"""
+    try:
+        # 날짜 범위 생성
+        dates = []
+        current = datetime.strptime(start_date, '%Y-%m-%d')
+        end = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        while current <= end:
+            dates.append(current.strftime('%Y-%m-%d'))
+            current += timedelta(days=1)
+        
+        # 배치 쿼리로 데이터 수집
+        daily_data = {}
+        
+        # 25개씩 배치 처리
+        for i in range(0, len(dates), 25):
+            batch_dates = dates[i:i+25]
+            
+            # 배치 요청 구성
+            request_items = {
+                'studyroom-proxy-db': {
+                    'Keys': [{'date': date} for date in batch_dates],
+                    'ProjectionExpression': '#d, reservations',
+                    'ExpressionAttributeNames': {'#d': 'date'}
+                }
+            }
+            
+            try:
+                response = dynamodb.batch_get_item(RequestItems=request_items)
+                
+                # 응답 처리 (Python 객체 형식)
+                if 'Responses' in response and 'studyroom-proxy-db' in response['Responses']:
+                    print(f"Batch response items: {len(response['Responses']['studyroom-proxy-db'])}")
+                    for item in response['Responses']['studyroom-proxy-db']:
+                        date = item['date']  # Python 문자열
+                        print(f"Processing date: {date}")
+                        reservations = 0
+                        hours = 0
+                        revenue = 0
+                        
+                        if 'reservations' in item and item['reservations']:
+                            print(f"Found {len(item['reservations'])} reservations for {date}")
+                            for reservation in item['reservations']:
+                                status = reservation.get('status', '')
+                                user = reservation.get('user', '')
+                                if status in ['USED', 'RESERVED'] and user not in ['최은숙', '배준기']:
+                                    reservations += 1
+                                    hours += float(reservation.get('hours', 0)) / 60
+                                    revenue += int(reservation.get('revenue', 0))
+                        
+                        print(f"Final counts for {date}: {reservations} reservations, {hours} hours, {revenue} revenue")
+                        daily_data[date] = {
+                            'reservations': reservations,
+                            'hours': hours,
+                            'revenue': revenue
+                        }
+                else:
+                    print(f"No batch response data found")
+                
+                # 누락된 날짜 처리
+                for date in batch_dates:
+                    if date not in daily_data:
+                        daily_data[date] = {'reservations': 0, 'hours': 0, 'revenue': 0}
+                        
+            except Exception as e:
+                print(f"Batch query error for dates {batch_dates}: {e}")
+                # 배치 실패시 개별 쿼리로 폴백
+                table = dynamodb.Table('studyroom-proxy-db')
+                for date in batch_dates:
+                    try:
+                        response = table.get_item(Key={'date': date}, ProjectionExpression='reservations')
+                        if 'Item' in response:
+                            item = response['Item']
+                            reservations = 0
+                            hours = 0
+                            revenue = 0
+                            
+                            if 'reservations' in item and item['reservations']:
+                                for reservation in item['reservations']:
+                                    status = reservation.get('status', '')
+                                    user = reservation.get('user', '')
+                                    if status in ['USED', 'RESERVED'] and user not in ['최은숙', '배준기']:
+                                        reservations += 1
+                                        hours += float(reservation.get('hours', 0)) / 60
+                                        revenue += int(reservation.get('revenue', 0))
+                            
+                            daily_data[date] = {'reservations': reservations, 'hours': hours, 'revenue': revenue}
+                        else:
+                            daily_data[date] = {'reservations': 0, 'hours': 0, 'revenue': 0}
+                    except Exception as e2:
+                        print(f"Individual query error for {date}: {e2}")
+                        daily_data[date] = {'reservations': 0, 'hours': 0, 'revenue': 0}
+        
+        # 주별/월별 집계
+        labels = []
+        reservations_data = []
+        hours_data = []
+        revenue_data = []
+        
+        if analysis_type == 'weekly':
+            # 주별 집계
+            week_data = {}
+            for date_str in dates:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                year = date_obj.year
+                week = date_obj.isocalendar()[1]
+                week_key = f"{year}-W{week:02d}"
+                
+                if week_key not in week_data:
+                    week_data[week_key] = {'reservations': 0, 'hours': 0, 'revenue': 0}
+                
+                data = daily_data.get(date_str, {'reservations': 0, 'hours': 0, 'revenue': 0})
+                week_data[week_key]['reservations'] += data['reservations']
+                week_data[week_key]['hours'] += data['hours']
+                week_data[week_key]['revenue'] += data['revenue']
+            
+            # 정렬된 주차별 데이터
+            for week_key in sorted(week_data.keys()):
+                labels.append(week_key)
+                reservations_data.append(week_data[week_key]['reservations'])
+                hours_data.append(round(week_data[week_key]['hours'], 1))
+                revenue_data.append(week_data[week_key]['revenue'])
+                
+        elif analysis_type == 'monthly':
+            # 월별 집계
+            month_data = {}
+            for date_str in dates:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                month_key = f"{date_obj.year}-{date_obj.month:02d}"
+                
+                if month_key not in month_data:
+                    month_data[month_key] = {'reservations': 0, 'hours': 0, 'revenue': 0}
+                
+                data = daily_data.get(date_str, {'reservations': 0, 'hours': 0, 'revenue': 0})
+                month_data[month_key]['reservations'] += data['reservations']
+                month_data[month_key]['hours'] += data['hours']
+                month_data[month_key]['revenue'] += data['revenue']
+            
+            # 정렬된 월별 데이터
+            for month_key in sorted(month_data.keys()):
+                labels.append(month_key)
+                reservations_data.append(month_data[month_key]['reservations'])
+                hours_data.append(round(month_data[month_key]['hours'], 1))
+                revenue_data.append(month_data[month_key]['revenue'])
+        
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({
+                'labels': labels,
+                'reservations': reservations_data,
+                'hours': hours_data,
+                'revenue': revenue_data,
+                'period': f"{start_date} ~ {end_date}",
+                'type': analysis_type
+            })
+        }
+        
+    except Exception as e:
+        print(f"Error in get_trends_data: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+            'body': json.dumps({'error': str(e)})
+        }
+def auto_sync_data():
+    """Proxy DB 마지막 날부터 오늘까지 자동 데이터 동기화"""
+    try:
+        table = dynamodb.Table('studyroom-proxy-db')
+        
+        # 마지막 데이터 날짜 확인
+        response = table.scan(
+            ProjectionExpression='#d',
+            ExpressionAttributeNames={'#d': 'date'}
+        )
+        
+        if not response['Items']:
+            # 데이터가 없으면 최근 7일 수집
+            last_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        else:
+            # 가장 최근 날짜 찾기
+            dates = [item['date'] for item in response['Items']]
+            last_date = max(dates)
+        
+        # 마지막 날부터 오늘까지 수집 (마지막 날 포함)
+        start_date = datetime.strptime(last_date, '%Y-%m-%d')
+        today = datetime.now()
+        
+        collected = []
+        current = start_date
+        
+        while current <= today:
+            date_str = current.strftime('%Y-%m-%d')
+            
+            # 새 데이터 수집 (기존 데이터 덮어쓰기)
+            result = collect_data_for_date(date_str)
+            collected.append(f"{date_str}: {result}")
+            current += timedelta(days=1)
+        
+        return {
+            'statusCode': 200,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({
+                'synced': len(collected),
+                'results': collected,
+                'last_date': last_date
+            })
+        }
+        
+    except Exception as e:
+        print(f"Auto sync error: {e}")
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': str(e)})
+        }
+
+def collect_data_for_date(target_date):
+    """특정 날짜의 데이터 수집"""
+    try:
+        # 토큰 획득
+        token_result = get_new_token()
+        if not token_result:
+            return "토큰 획득 실패"
+        
+        token = token_result['access_token']
+        p_code = token_result['p_code']
+        
+        # API 호출 (메인 엔드포인트와 동일한 헤더 사용)
+        response = http.request(
+            'GET',
+            f'https://api.comepass.kr/place/studyroom?date={target_date}',
+            headers={
+                'Accept': 'application/json, text/plain, */*',
+                'Authorization': f'Bearer {token}',
+                'Origin': 'https://place.comepass.kr',
+                'Referer': 'https://place.comepass.kr/',
+                'X-Dmon-Place-Code': p_code,
+                'X-Dmon-Request-From': 'place_admin_web',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        )
+        
+        if response.status != 200:
+            print(f"API 호출 실패 - Status: {response.status}")
+            print(f"Response headers: {response.headers}")
+            print(f"Response data: {response.data.decode('utf-8')}")
+            return f"API 호출 실패: {response.status}"
+        
+        raw_data = json.loads(response.data.decode('utf-8'))
+        
+        # 예약 데이터 변환 (중복 방지를 위한 정규화)
+        reservations = []
+        for reservation in raw_data.get('list', []):
+            if reservation.get('s_state') in ['USED', 'RESERVED']:
+                user_name = reservation.get('m_nm', '')
+                if user_name not in ['최은숙', '배준기']:
+                    reservations.append({
+                        'status': reservation.get('s_state'),
+                        'hours': int(reservation.get('s_use_time', 0)),
+                        'revenue': int(reservation.get('ord_pay_price', 0)),
+                        'room': reservation.get('sg_name', ''),
+                        'user': user_name,
+                        'start_time': reservation.get('s_s_time', '')
+                    })
+        
+        # DynamoDB 저장 (중복 데이터 덮어쓰기)
+        table = dynamodb.Table('studyroom-proxy-db')
+        table.put_item(Item={
+            'date': target_date,
+            'cached_at': datetime.now().isoformat(),
+            'full_response': raw_data,
+            'reservations': reservations
+        })
+        
+        return f"성공 ({len(reservations)}건)"
+        
+    except Exception as e:
+        return f"오류: {str(e)}"
+
+def collect_and_store_reservation_data():
+    """수동 데이터 수집"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    result = collect_data_for_date(today)
+    
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({
+            'message': 'Data collected successfully',
+            'date': today,
+            'result': result
+        })
+    }
+
+def collect_past_data():
+    """과거 데이터 수집 (12월 전체)"""
+    results = []
+    
+    # 2025년 12월 전체 수집
+    for day in range(1, 32):
+        date_str = f"2025-12-{day:02d}"
+        result = collect_data_for_date(date_str)
+        results.append(f"{date_str}: {result}")
+    
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({
+            'message': 'Past data collection completed',
+            'results': results
+        })
+    }
+
+def collect_three_months_data():
+    """최근 3달간 모든 데이터 수집"""
+    results = []
+    
+    # 2025년 10월 (31일)
+    for day in range(1, 32):
+        date_str = f"2025-10-{day:02d}"
+        result = collect_data_for_date(date_str)
+        results.append(f"{date_str}: {result}")
+    
+    # 2025년 11월 (30일)
+    for day in range(1, 31):
+        date_str = f"2025-11-{day:02d}"
+        result = collect_data_for_date(date_str)
+        results.append(f"{date_str}: {result}")
+    
+    # 2025년 12월 (31일)
+    for day in range(1, 32):
+        date_str = f"2025-12-{day:02d}"
+        result = collect_data_for_date(date_str)
+        results.append(f"{date_str}: {result}")
+    
+    # 2026년 1월 (현재까지)
+    for day in range(1, 9):  # 1월 1일~8일
+        date_str = f"2026-01-{day:02d}"
+        result = collect_data_for_date(date_str)
+        results.append(f"{date_str}: {result}")
+    
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': json.dumps({
+            'message': 'Three months data collection completed',
+            'total_days': len(results),
+            'results': results
+        })
+    }
